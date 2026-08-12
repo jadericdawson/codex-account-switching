@@ -209,6 +209,7 @@ async fn assert_account_updated(
         AccountUpdatedNotification {
             auth_mode,
             plan_type: None,
+            email: None,
         }
     );
     Ok(())

@@ -13,6 +13,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 use crate::inline_visualization::InlineVisualizationContext;
+use codex_app_server_protocol::AccountSessionsResponse;
 use codex_app_server_protocol::AddCreditsNudgeCreditType;
 use codex_app_server_protocol::AddCreditsNudgeEmailStatus;
 use codex_app_server_protocol::ConsumeAccountRateLimitResetCreditResponse;
@@ -193,6 +194,20 @@ pub(crate) enum TranscriptExportDestination {
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
 pub(crate) enum AppEvent {
+    /// Load the account picker entries.
+    OpenAccountSwitcher,
+    /// Show the account picker after loading its entries.
+    AccountSessionsLoaded {
+        result: Result<AccountSessionsResponse, String>,
+    },
+    /// Switch the app-server to a previously captured account session.
+    SwitchAccount {
+        session_id: String,
+        account_id: String,
+    },
+    /// Start a browser login for an additional account.
+    StartAccountLogin,
+
     /// Open the agent picker for switching active threads.
     OpenAgentPicker,
     /// Merge a completed root-scoped agent-picker refresh without blocking terminal input.

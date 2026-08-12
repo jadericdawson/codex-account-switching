@@ -1838,6 +1838,33 @@ impl BottomPane {
         }
     }
 
+    /// Updates the account identity shown at the right edge of the composer footer.
+    pub(crate) fn set_account_label(&mut self, account_label: Option<String>) {
+        if self.composer.set_account_label(account_label) {
+            self.request_redraw();
+        }
+    }
+
+    pub(crate) fn set_weekly_usage_percent(&mut self, weekly_usage_percent: Option<u8>) {
+        if self.composer.set_weekly_usage_percent(weekly_usage_percent) {
+            self.request_redraw();
+        }
+    }
+
+    pub(crate) fn account_footer_hit_test(
+        &self,
+        column: u16,
+        row: u16,
+        screen_width: u16,
+        screen_height: u16,
+    ) -> bool {
+        let Some(footer_width) = self.composer.account_footer_width() else {
+            return false;
+        };
+        row == screen_height.saturating_sub(1)
+            && column >= screen_width.saturating_sub(footer_width)
+    }
+
     pub(crate) fn set_side_conversation_context_label(&mut self, label: Option<String>) {
         if self.composer.set_side_conversation_context_label(label) {
             self.request_redraw();

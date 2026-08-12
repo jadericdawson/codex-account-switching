@@ -26,6 +26,10 @@ use codex_app_server_client::AppServerPath;
 use codex_app_server_client::AppServerRequestHandle;
 use codex_app_server_client::TypedRequestError;
 use codex_app_server_protocol::Account;
+use codex_app_server_protocol::AccountSessionsListParams;
+use codex_app_server_protocol::AccountSessionsResponse;
+use codex_app_server_protocol::AccountSessionsSwitchParams;
+use codex_app_server_protocol::AccountSessionsSwitchResponse;
 use codex_app_server_protocol::AskForApproval;
 use codex_app_server_protocol::AuthMode;
 use codex_app_server_protocol::ClientRequest;
@@ -41,6 +45,8 @@ use codex_app_server_protocol::GetAccountParams;
 use codex_app_server_protocol::GetAccountRateLimitsResponse;
 use codex_app_server_protocol::GetAccountResponse;
 use codex_app_server_protocol::JSONRPCErrorError;
+use codex_app_server_protocol::LoginAccountParams;
+use codex_app_server_protocol::LoginAccountResponse;
 use codex_app_server_protocol::LogoutAccountResponse;
 use codex_app_server_protocol::MemoryResetResponse;
 use codex_app_server_protocol::Model as ApiModel;
@@ -1298,6 +1304,52 @@ impl AppServerSession {
         Ok(())
     }
 
+    pub(crate) async fn account_sessions_list(&mut self) -> Result<AccountSessionsResponse> {
+        let request_id = self.next_request_id();
+        self.client
+            .request_typed(ClientRequest::AccountSessionsList {
+                request_id,
+                params: AccountSessionsListParams {
+                    refresh_workspace_metadata: false,
+                },
+            })
+            .await
+            .wrap_err("account/sessions/list failed in TUI")
+    }
+
+    pub(crate) async fn account_sessions_switch(
+        &mut self,
+        session_id: String,
+        account_id: String,
+    ) -> Result<AccountSessionsSwitchResponse> {
+        let request_id = self.next_request_id();
+        self.client
+            .request_typed(ClientRequest::AccountSessionsSwitch {
+                request_id,
+                params: AccountSessionsSwitchParams {
+                    session_id,
+                    account_id,
+                },
+            })
+            .await
+            .wrap_err("account/sessions/switch failed in TUI")
+    }
+
+    pub(crate) async fn start_account_login(&mut self) -> Result<LoginAccountResponse> {
+        let request_id = self.next_request_id();
+        self.client
+            .request_typed(ClientRequest::LoginAccount {
+                request_id,
+                params: LoginAccountParams::Chatgpt {
+                    app_brand: None,
+                    codex_streamlined_login: false,
+                    use_hosted_login_success_page: false,
+                },
+            })
+            .await
+            .wrap_err("account/login/start failed in TUI")
+    }
+
     pub(crate) async fn thread_unsubscribe(&mut self, thread_id: ThreadId) -> Result<()> {
         let request_id = self.next_request_id();
         let _: ThreadUnsubscribeResponse = self
@@ -1491,6 +1543,7 @@ pub(crate) async fn start_thread_with_request_handle(
 pub(crate) fn status_account_display_from_auth_mode(
     auth_mode: Option<AuthMode>,
     plan_type: Option<codex_protocol::account::PlanType>,
+    email: Option<String>,
 ) -> Option<StatusAccountDisplay> {
     match auth_mode {
         Some(AuthMode::ApiKey) => Some(StatusAccountDisplay::ApiKey),
@@ -1498,7 +1551,7 @@ pub(crate) fn status_account_display_from_auth_mode(
         | Some(AuthMode::ChatgptAuthTokens)
         | Some(AuthMode::AgentIdentity)
         | Some(AuthMode::PersonalAccessToken) => Some(StatusAccountDisplay::ChatGpt {
-            email: None,
+            email,
             plan: plan_type.map(plan_type_display_name),
         }),
         Some(AuthMode::Headers) | Some(AuthMode::BedrockApiKey) => None,
@@ -3337,6 +3390,7 @@ mod tests {
         let business = status_account_display_from_auth_mode(
             Some(AuthMode::Chatgpt),
             Some(codex_protocol::account::PlanType::EnterpriseCbpUsageBased),
+            None,
         );
         assert!(matches!(
             business,
@@ -3349,6 +3403,7 @@ mod tests {
         let team = status_account_display_from_auth_mode(
             Some(AuthMode::Chatgpt),
             Some(codex_protocol::account::PlanType::SelfServeBusinessUsageBased),
+            None,
         );
         assert!(matches!(
             team,
@@ -3361,6 +3416,7 @@ mod tests {
         let business_prolite = status_account_display_from_auth_mode(
             Some(AuthMode::Chatgpt),
             Some(codex_protocol::account::PlanType::SelfServeBusinessProLite),
+            None,
         );
         assert!(matches!(
             business_prolite,

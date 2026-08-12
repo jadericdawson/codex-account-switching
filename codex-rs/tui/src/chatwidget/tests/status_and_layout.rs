@@ -2313,6 +2313,30 @@ async fn ui_snapshots_small_heights_idle() {
     }
 }
 
+#[tokio::test]
+async fn account_email_is_rendered_below_composer() {
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.show_welcome_banner = false;
+    chat.bottom_pane
+        .set_account_label(Some("user@example.com".to_string()));
+    chat.bottom_pane.set_weekly_usage_percent(Some(42));
+
+    let width = 80;
+    let height = chat.desired_height(width);
+    let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("create terminal");
+    terminal
+        .draw(|f| chat.render(f.area(), f.buffer_mut()))
+        .expect("draw chat with account footer");
+
+    assert_chatwidget_snapshot!(
+        "account_email_is_rendered_below_composer",
+        normalized_backend_snapshot(terminal.backend()),
+    );
+}
+
 // Snapshot test: ChatWidget at very small heights (task running)
 // Validates how status + composer are presented within tight space.
 #[tokio::test]

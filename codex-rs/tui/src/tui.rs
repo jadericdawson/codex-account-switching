@@ -23,6 +23,7 @@ use crossterm::event::EnableBracketedPaste;
 #[cfg(not(windows))]
 use crossterm::event::EnableFocusChange;
 use crossterm::event::KeyEvent;
+use crossterm::event::MouseEvent;
 use crossterm::terminal::EnterAlternateScreen;
 use crossterm::terminal::LeaveAlternateScreen;
 #[cfg(not(unix))]
@@ -549,6 +550,8 @@ fn set_panic_hook() {
 pub enum TuiEvent {
     /// A terminal key event after focus, paste, and protocol bookkeeping has been handled.
     Key(KeyEvent),
+    /// A terminal mouse event used for clickable footer controls.
+    Mouse(MouseEvent),
     /// A bracketed paste payload normalized by the app layer before it reaches the composer.
     Paste(String),
     /// A terminal size notification and its reported dimensions.

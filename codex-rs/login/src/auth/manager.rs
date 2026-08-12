@@ -629,7 +629,7 @@ impl CodexAuth {
     }
 
     /// Returns `None` if token-backed ChatGPT auth is unavailable.
-    fn get_current_auth_json(&self) -> Option<AuthDotJson> {
+    pub fn get_current_auth_json(&self) -> Option<AuthDotJson> {
         let state = match self {
             Self::Chatgpt(auth) => &auth.state,
             Self::ChatgptAuthTokens(auth) => &auth.state,
@@ -2358,6 +2358,32 @@ impl AuthManager {
         tracing::info!("Reloading auth");
         let new_auth = self.load_auth().await;
         self.set_cached_auth(new_auth)
+    }
+
+    /// Replaces the active auth with a previously captured auth payload.
+    ///
+    /// This is used by the in-process account switcher. Persisting the selected
+    /// payload keeps the rest of the app-server, including newly created
+    /// threads, on the selected account.
+    pub async fn switch_to_auth_dot_json(&self, auth_dot_json: AuthDotJson) -> std::io::Result<()> {
+        let auth = CodexAuth::from_auth_dot_json(
+            &self.codex_home,
+            auth_dot_json.clone(),
+            self.auth_credentials_store_mode,
+            self.chatgpt_base_url.as_deref(),
+            self.keyring_backend_kind,
+            self.agent_identity_authapi_base_url.as_deref(),
+            &self.auth_route_config,
+        )
+        .await?;
+        save_auth(
+            &self.codex_home,
+            &auth_dot_json,
+            self.auth_credentials_store_mode,
+            self.keyring_backend_kind,
+        )?;
+        self.set_cached_auth(Some(auth));
+        Ok(())
     }
 
     async fn reload_if_account_id_matches(

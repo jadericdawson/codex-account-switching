@@ -634,6 +634,8 @@ impl ChatComposer {
                 status_line_enabled: false,
                 side_conversation_context_label: None,
                 active_agent_label: None,
+                account_label: None,
+                weekly_usage_percent: None,
                 external_editor_key: default_keymap
                     .primary_hint(KeymapContext::Global, "open_external_editor"),
                 show_transcript_key: default_keymap
@@ -4285,6 +4287,32 @@ impl ChatComposer {
         self.footer.active_agent_label = active_agent_label;
         true
     }
+
+    pub(crate) fn set_account_label(&mut self, account_label: Option<String>) -> bool {
+        if self.footer.account_label == account_label {
+            return false;
+        }
+        self.footer.account_label = account_label;
+        true
+    }
+
+    pub(crate) fn set_weekly_usage_percent(&mut self, weekly_usage_percent: Option<u8>) -> bool {
+        if self.footer.weekly_usage_percent == weekly_usage_percent {
+            return false;
+        }
+        self.footer.weekly_usage_percent = weekly_usage_percent;
+        true
+    }
+
+    pub(crate) fn account_footer_width(&self) -> Option<u16> {
+        let account = self.footer.account_label.as_deref()?;
+        let usage = self
+            .footer
+            .weekly_usage_percent
+            .map(|percent| format!(" | weekly: {percent}% used"))
+            .unwrap_or_default();
+        Some((format!("account: {account}{usage}").chars().count() as u16).saturating_add(2))
+    }
 }
 
 fn footer_insert_newline_key(
@@ -4601,7 +4629,7 @@ impl ChatComposer {
                             show_queue_hint,
                         )
                     };
-                    let right_line =
+                    let mut right_line =
                         if let Some(label) = self.footer.side_conversation_context_label.as_ref() {
                             Some(side_conversation_context_line(label))
                         } else if let Some(line) = self.shell_mode_footer_line() {
@@ -4620,6 +4648,16 @@ impl ChatComposer {
                         } else {
                             Some(self.right_footer_line_with_context())
                         };
+                    if let Some(account_label) = self.footer.account_label.as_ref() {
+                        let line = right_line.get_or_insert_with(Line::default);
+                        if !line.spans.is_empty() {
+                            line.spans.push(" | ".dim());
+                        }
+                        line.spans.push(format!("account: {account_label}").dim());
+                        if let Some(percent) = self.footer.weekly_usage_percent {
+                            line.spans.push(format!(" | weekly: {percent}% used").dim());
+                        }
+                    }
                     let right_width = right_line.as_ref().map(|l| l.width() as u16).unwrap_or(0);
                     if status_line_active
                         && let Some(max_left) = max_left_width_for_right(hint_rect, right_width)
@@ -4659,6 +4697,12 @@ impl ChatComposer {
                             | FooterMode::QuitShortcutReminder
                             | FooterMode::ShortcutOverlay => None,
                         }
+                    };
+                    let single_line_layout = match single_line_layout {
+                        Some((_, false)) if self.footer.account_label.is_some() => {
+                            Some((SummaryLeft::None, true))
+                        }
+                        layout => layout,
                     };
                     let show_right = if matches!(
                         footer_props.mode,

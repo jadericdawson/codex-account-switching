@@ -23,6 +23,47 @@ impl App {
         event: AppEvent,
     ) -> Result<AppRunControl> {
         match event {
+            AppEvent::OpenAccountSwitcher => {
+                let result = app_server
+                    .account_sessions_list()
+                    .await
+                    .map_err(|err| err.to_string());
+                self.app_event_tx
+                    .send(AppEvent::AccountSessionsLoaded { result });
+            }
+            AppEvent::AccountSessionsLoaded { result } => match result {
+                Ok(response) => self.chat_widget.show_account_sessions(response),
+                Err(err) => self
+                    .chat_widget
+                    .add_error_message(format!("Could not load accounts: {err}")),
+            },
+            AppEvent::SwitchAccount {
+                session_id,
+                account_id,
+            } => match app_server
+                .account_sessions_switch(session_id, account_id)
+                .await
+            {
+                Ok(_) => self
+                    .chat_widget
+                    .add_info_message("Switched account.".to_string(), None),
+                Err(err) => self
+                    .chat_widget
+                    .add_error_message(format!("Could not switch account: {err}")),
+            },
+            AppEvent::StartAccountLogin => match app_server.start_account_login().await {
+                Ok(codex_app_server_protocol::LoginAccountResponse::Chatgpt {
+                    auth_url, ..
+                }) => self
+                    .app_event_tx
+                    .send(AppEvent::OpenUrlInBrowser { url: auth_url }),
+                Ok(other) => self
+                    .chat_widget
+                    .add_error_message(format!("Could not start account login: {other:?}")),
+                Err(err) => self
+                    .chat_widget
+                    .add_error_message(format!("Could not start account login: {err}")),
+            },
             AppEvent::NewSession { name } => {
                 self.start_fresh_session_with_summary_hint(
                     tui, app_server, /*session_start_source*/ None,

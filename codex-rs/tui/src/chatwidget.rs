@@ -78,6 +78,7 @@ use crate::text_formatting::proper_join;
 use crate::token_usage::TokenUsage;
 use crate::token_usage::TokenUsageInfo;
 use crate::version::CODEX_CLI_VERSION;
+use codex_app_server_protocol::AccountSessionsResponse;
 use codex_app_server_protocol::AddCreditsNudgeCreditType;
 use codex_app_server_protocol::AddCreditsNudgeEmailStatus;
 use codex_app_server_protocol::AppSummary;
@@ -165,6 +166,9 @@ use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
 use crossterm::event::KeyModifiers;
+use crossterm::event::MouseButton;
+use crossterm::event::MouseEvent;
+use crossterm::event::MouseEventKind;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::Modifier;
@@ -1370,6 +1374,72 @@ impl ChatWidget {
 
     fn request_redraw(&mut self) {
         self.frame_requester.schedule_frame();
+    }
+
+    pub(crate) fn handle_mouse_event(
+        &mut self,
+        event: MouseEvent,
+        screen_size: ratatui::layout::Size,
+    ) {
+        if !matches!(event.kind, MouseEventKind::Down(MouseButton::Left))
+            || !self.no_modal_or_popup_active()
+            || !self.bottom_pane.account_footer_hit_test(
+                event.column,
+                event.row,
+                screen_size.width,
+                screen_size.height,
+            )
+        {
+            return;
+        }
+        self.app_event_tx.send(AppEvent::OpenAccountSwitcher);
+    }
+
+    pub(crate) fn show_account_sessions(&mut self, response: AccountSessionsResponse) {
+        let mut items = response
+            .sessions
+            .into_iter()
+            .map(|session| {
+                let session_id = session.session_id.clone();
+                let account_id = session
+                    .selected_workspace_account_id
+                    .clone()
+                    .unwrap_or_else(|| session.session_id.clone());
+                SelectionItem {
+                    name: session
+                        .email
+                        .clone()
+                        .unwrap_or_else(|| "ChatGPT account".to_string()),
+                    description: Some(if session.is_active {
+                        "Currently active".to_string()
+                    } else {
+                        "Switch to this account".to_string()
+                    }),
+                    is_current: session.is_active,
+                    actions: vec![Box::new(move |tx| {
+                        tx.send(AppEvent::SwitchAccount {
+                            session_id: session_id.clone(),
+                            account_id: account_id.clone(),
+                        });
+                    })],
+                    dismiss_on_select: true,
+                    ..Default::default()
+                }
+            })
+            .collect::<Vec<_>>();
+        items.push(SelectionItem {
+            name: "Add another account".to_string(),
+            description: Some("Open ChatGPT sign-in in your browser".to_string()),
+            actions: vec![Box::new(|tx| tx.send(AppEvent::StartAccountLogin))],
+            dismiss_on_select: true,
+            ..Default::default()
+        });
+        self.bottom_pane.show_selection_view(SelectionViewParams {
+            title: Some("Accounts".to_string()),
+            subtitle: Some("Choose the account Codex should use".to_string()),
+            items,
+            ..Default::default()
+        });
     }
 
     fn bump_active_cell_revision(&mut self) {

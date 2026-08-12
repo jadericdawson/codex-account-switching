@@ -880,6 +880,7 @@ mod tests {
         let notification = ServerNotification::AccountUpdated(AccountUpdatedNotification {
             auth_mode: Some(AuthMode::Chatgpt),
             plan_type: Some(PlanType::SelfServeBusinessProLite),
+            email: None,
         });
 
         assert_eq!(

@@ -1,0 +1,8 @@
+*
+!package.json
+!README.md
+!LICENSE
+!npm/
+!npm/bin/
+!npm/bin/codex.js
+!npm/install.js

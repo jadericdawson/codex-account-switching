@@ -305,6 +305,13 @@ impl ChatWidget {
             self.rate_limit_snapshots_by_limit_id
                 .insert(limit_id, display);
 
+            let weekly_usage_percent = self
+                .rate_limit_snapshots_by_limit_id
+                .get("codex")
+                .and_then(weekly_usage_percent);
+            self.bottom_pane
+                .set_weekly_usage_percent(weekly_usage_percent);
+
             if !warnings.is_empty() {
                 for warning in warnings {
                     self.add_to_history(history_cell::new_warning_event(warning));
@@ -315,6 +322,7 @@ impl ChatWidget {
             self.rate_limit_snapshots_by_limit_id.clear();
             self.codex_rate_limit_reached_type = None;
             self.codex_spend_control_reached = None;
+            self.bottom_pane.set_weekly_usage_percent(None);
         }
         self.refresh_status_line();
     }
@@ -543,4 +551,16 @@ impl ChatWidget {
             self.rate_limit_switch_prompt = RateLimitSwitchPromptState::Idle;
         }
     }
+}
+
+fn weekly_usage_percent(snapshot: &RateLimitSnapshotDisplay) -> Option<u8> {
+    [snapshot.primary.as_ref(), snapshot.secondary.as_ref()]
+        .into_iter()
+        .flatten()
+        .find(|window| {
+            window
+                .window_minutes
+                .is_some_and(|minutes| minutes >= 7 * 24 * 60)
+        })
+        .map(|window| window.used_percent.clamp(0.0, 100.0).round() as u8)
 }

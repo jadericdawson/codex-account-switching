@@ -265,6 +265,11 @@ impl ChatWidget {
             .set_status_line_enabled(!widget.configured_status_line_items().is_empty());
         widget
             .bottom_pane
+            .set_account_label(super::settings::account_label(
+                widget.status_account_display.as_ref(),
+            ));
+        widget
+            .bottom_pane
             .set_collaboration_modes_enabled(/*enabled*/ true);
         widget.sync_service_tier_commands();
         widget.sync_personality_command_enabled();

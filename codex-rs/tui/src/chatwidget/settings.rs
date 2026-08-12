@@ -237,6 +237,8 @@ impl ChatWidget {
         self.status_line_workspace_headline_last_requested_at = None;
         self.status_line_workspace_messages_disabled = false;
         self.status_account_display = status_account_display;
+        self.bottom_pane
+            .set_account_label(account_label(self.status_account_display.as_ref()));
         self.plan_type = plan_type;
         self.has_chatgpt_account = has_chatgpt_account;
         self.has_codex_backend_auth = has_codex_backend_auth;
@@ -750,4 +752,13 @@ impl ChatWidget {
             ),
         });
     }
+}
+
+pub(super) fn account_label(account: Option<&StatusAccountDisplay>) -> Option<String> {
+    account.map(|account| match account {
+        StatusAccountDisplay::ChatGpt { email, .. } => {
+            email.clone().unwrap_or_else(|| "ChatGPT".to_string())
+        }
+        StatusAccountDisplay::ApiKey => "API key".to_string(),
+    })
 }

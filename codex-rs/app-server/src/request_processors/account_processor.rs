@@ -4,9 +4,16 @@ use super::*;
 use crate::auth_mode::auth_mode_to_api;
 use crate::external_auth::ExternalAuthBridge;
 use chrono::DateTime;
+use chrono::Utc;
+use codex_app_server_protocol::AccountSession;
+use codex_app_server_protocol::AccountSessionsResponse;
+use codex_app_server_protocol::AccountSessionsSwitchParams;
+use codex_app_server_protocol::AccountSessionsSwitchResponse;
 use codex_app_server_protocol::DesktopOnboardingEntrypoint;
+use codex_login::AuthDotJson;
 use codex_login::LoginOnboardingEntrypoint;
 use codex_model_provider::is_supported_amazon_bedrock_region;
+use std::sync::Mutex as StdMutex;
 
 mod rate_limit_resets;
 
@@ -62,6 +69,14 @@ enum RefreshTokenRequestOutcome {
     FailedPermanently,
 }
 
+#[derive(Clone)]
+struct SavedAccount {
+    account_id: String,
+    email: Option<String>,
+    auth_dot_json: AuthDotJson,
+    last_used_at: i64,
+}
+
 impl Drop for ActiveLogin {
     fn drop(&mut self) {
         self.cancel();
@@ -76,6 +91,7 @@ pub(crate) struct AccountRequestProcessor {
     config: Arc<Config>,
     config_manager: ConfigManager,
     active_login: Arc<Mutex<Option<ActiveLogin>>>,
+    saved_accounts: Arc<StdMutex<Vec<SavedAccount>>>,
 }
 
 impl AccountRequestProcessor {
@@ -86,14 +102,18 @@ impl AccountRequestProcessor {
         config: Arc<Config>,
         config_manager: ConfigManager,
     ) -> Self {
-        Self {
+        let saved_accounts = Arc::new(StdMutex::new(Vec::new()));
+        let processor = Self {
             auth_manager,
             thread_manager,
             outgoing,
             config,
             config_manager,
             active_login: Arc::new(Mutex::new(None)),
-        }
+            saved_accounts,
+        };
+        processor.remember_current_account();
+        processor
     }
 
     pub(crate) async fn login_account(
@@ -109,6 +129,95 @@ impl AccountRequestProcessor {
         request_id: ConnectionRequestId,
     ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
         self.logout_v2(request_id).await.map(|()| None)
+    }
+
+    pub(crate) async fn account_sessions_list(
+        &self,
+    ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
+        Ok(Some(self.account_sessions_response().into()))
+    }
+
+    pub(crate) async fn account_sessions_switch(
+        &self,
+        params: AccountSessionsSwitchParams,
+    ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
+        let saved = self.saved_accounts.lock().ok().and_then(|accounts| {
+            accounts
+                .iter()
+                .find(|account| {
+                    account.account_id == params.account_id
+                        && account.account_id == params.session_id
+                })
+                .cloned()
+        });
+        let Some(saved) = saved else {
+            return Err(invalid_request("account session was not found"));
+        };
+
+        self.remember_current_account();
+        self.auth_manager
+            .switch_to_auth_dot_json(saved.auth_dot_json)
+            .await
+            .map_err(|err| internal_error(format!("failed to switch account: {err}")))?;
+        self.remember_current_account();
+        self.send_login_success_notifications(/*login_id*/ None)
+            .await;
+        Ok(Some(AccountSessionsSwitchResponse {}.into()))
+    }
+
+    fn remember_current_account(&self) {
+        let Some(auth) = self.auth_manager.auth_cached() else {
+            return;
+        };
+        let Some(auth_dot_json) = auth.get_current_auth_json() else {
+            return;
+        };
+        let Some(account_id) = auth.get_account_id() else {
+            return;
+        };
+        let account = SavedAccount {
+            account_id,
+            email: auth.get_account_email(),
+            auth_dot_json,
+            last_used_at: Utc::now().timestamp(),
+        };
+        if let Ok(mut accounts) = self.saved_accounts.lock() {
+            accounts.retain(|saved| saved.account_id != account.account_id);
+            accounts.push(account);
+        }
+    }
+
+    fn account_sessions_response(&self) -> AccountSessionsResponse {
+        let active_account_id = self
+            .auth_manager
+            .auth_cached()
+            .as_ref()
+            .and_then(CodexAuth::get_account_id);
+        let sessions = self
+            .saved_accounts
+            .lock()
+            .map(|accounts| {
+                accounts
+                    .iter()
+                    .map(|account| AccountSession {
+                        session_id: account.account_id.clone(),
+                        email: account.email.clone(),
+                        user_id: None,
+                        display_name: None,
+                        image_url: None,
+                        last_used_at: account.last_used_at,
+                        is_active: active_account_id.as_deref()
+                            == Some(account.account_id.as_str()),
+                        selected_workspace_account_id: Some(account.account_id.clone()),
+                        workspaces: Vec::new(),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        AccountSessionsResponse {
+            active_session_id: active_account_id,
+            sessions,
+        }
     }
 
     pub(crate) async fn cancel_login_account(
@@ -193,6 +302,7 @@ impl AccountRequestProcessor {
                 .map(CodexAuth::api_auth_mode)
                 .map(auth_mode_to_api),
             plan_type: auth.as_ref().and_then(CodexAuth::account_plan_type),
+            email: auth.as_ref().and_then(CodexAuth::get_account_email),
         }
     }
 
@@ -795,6 +905,7 @@ impl AccountRequestProcessor {
     }
 
     async fn send_login_success_notifications(&self, login_id: Option<Uuid>) {
+        self.remember_current_account();
         Self::maybe_refresh_plugin_caches_for_current_config(
             &self.config_manager,
             &self.thread_manager,
@@ -858,6 +969,7 @@ impl AccountRequestProcessor {
                     .map(CodexAuth::api_auth_mode)
                     .map(auth_mode_to_api),
                 plan_type: auth.as_ref().and_then(CodexAuth::account_plan_type),
+                email: auth.as_ref().and_then(CodexAuth::get_account_email),
             };
             outgoing
                 .send_server_notification(ServerNotification::AccountUpdated(payload_v2))
@@ -924,6 +1036,7 @@ impl AccountRequestProcessor {
                 .map(|auth_mode| AccountUpdatedNotification {
                     auth_mode,
                     plan_type: None,
+                    email: None,
                 });
         self.outgoing
             .send_result(request_id, result.map(|_| LogoutAccountResponse {}))

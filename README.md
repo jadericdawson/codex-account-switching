@@ -1,8 +1,19 @@
-<p align="center"><strong>Codex CLI</strong> is a coding agent from OpenAI that runs locally on your computer.
+<p align="center"><strong>Codex CLI — account-switching fork</strong> is a local coding agent with an account footer, weekly usage display, and click-to-switch account picker.
 <p align="center">
   <img src="https://github.com/openai/codex/blob/main/.github/codex-cli-splash.png" alt="Codex CLI splash" width="80%" />
 </p>
 </br>
+
+This personal fork preserves the upstream Codex CLI while adding account visibility and account switching. Install the latest GitHub-backed npm package with:
+
+```shell
+npm install -g github:jadericdawson/codex-account-switching
+```
+
+The installer downloads the matching native Codex and Code Mode host binaries from the repository's GitHub Release. The upstream source and feature notes are retained below.
+
+---
+
 If you want Codex in your code editor (VS Code, Cursor, Windsurf), <a href="https://developers.openai.com/codex/ide">install in your IDE.</a>
 </br>If you want the desktop app experience, run <code>codex app</code> or visit <a href="https://chatgpt.com/codex?app-landing-page=true">the Codex App page</a>.
 </br>If you are looking for the <em>cloud-based agent</em> from OpenAI, <strong>Codex Web</strong>, go to <a href="https://chatgpt.com/codex">chatgpt.com/codex</a>.</p>
