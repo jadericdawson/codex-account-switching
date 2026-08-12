@@ -13,6 +13,13 @@ use codex_app_server_protocol::DesktopOnboardingEntrypoint;
 use codex_login::AuthDotJson;
 use codex_login::LoginOnboardingEntrypoint;
 use codex_model_provider::is_supported_amazon_bedrock_region;
+use serde::Deserialize;
+use serde::Serialize;
+use std::fs::OpenOptions;
+use std::io::Write;
+#[cfg(unix)]
+use std::os::unix::fs::OpenOptionsExt;
+use std::path::Path;
 use std::sync::Mutex as StdMutex;
 
 mod rate_limit_resets;
@@ -69,12 +76,70 @@ enum RefreshTokenRequestOutcome {
     FailedPermanently,
 }
 
-#[derive(Clone)]
+const SAVED_ACCOUNTS_FILENAME: &str = "account-sessions.json";
+
+#[derive(Clone, Deserialize, Serialize)]
 struct SavedAccount {
     account_id: String,
     email: Option<String>,
     auth_dot_json: AuthDotJson,
     last_used_at: i64,
+}
+
+#[derive(Deserialize, Serialize)]
+struct SavedAccounts {
+    accounts: Vec<SavedAccount>,
+}
+
+fn saved_accounts_path(codex_home: &Path) -> std::path::PathBuf {
+    codex_home.join(SAVED_ACCOUNTS_FILENAME)
+}
+
+fn load_saved_accounts(codex_home: &Path) -> Vec<SavedAccount> {
+    let path = saved_accounts_path(codex_home);
+    let contents = match std::fs::read_to_string(&path) {
+        Ok(contents) => contents,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Vec::new(),
+        Err(err) => {
+            tracing::warn!(
+                "failed to read saved account sessions from {}: {err}",
+                path.display()
+            );
+            return Vec::new();
+        }
+    };
+
+    match serde_json::from_str::<SavedAccounts>(&contents) {
+        Ok(saved_accounts) => saved_accounts.accounts,
+        Err(err) => {
+            tracing::warn!(
+                "failed to parse saved account sessions from {}: {err}",
+                path.display()
+            );
+            Vec::new()
+        }
+    }
+}
+
+fn save_saved_accounts(codex_home: &Path, accounts: &[SavedAccount]) -> std::io::Result<()> {
+    let path = saved_accounts_path(codex_home);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let contents = serde_json::to_string_pretty(&SavedAccounts {
+        accounts: accounts.to_vec(),
+    })?;
+    let mut options = OpenOptions::new();
+    options.truncate(true).write(true).create(true);
+    #[cfg(unix)]
+    {
+        options.mode(0o600);
+    }
+    let mut file = options.open(path)?;
+    file.write_all(contents.as_bytes())?;
+    file.flush()?;
+    Ok(())
 }
 
 impl Drop for ActiveLogin {
@@ -102,7 +167,7 @@ impl AccountRequestProcessor {
         config: Arc<Config>,
         config_manager: ConfigManager,
     ) -> Self {
-        let saved_accounts = Arc::new(StdMutex::new(Vec::new()));
+        let saved_accounts = Arc::new(StdMutex::new(load_saved_accounts(&config.codex_home)));
         let processor = Self {
             auth_manager,
             thread_manager,
@@ -184,6 +249,9 @@ impl AccountRequestProcessor {
         if let Ok(mut accounts) = self.saved_accounts.lock() {
             accounts.retain(|saved| saved.account_id != account.account_id);
             accounts.push(account);
+            if let Err(err) = save_saved_accounts(&self.config.codex_home, &accounts) {
+                tracing::warn!("failed to persist saved account sessions: {err}");
+            }
         }
     }
 
@@ -392,6 +460,8 @@ impl AccountRequestProcessor {
         request_id: ConnectionRequestId,
         params: LoginAccountParams,
     ) -> Result<(), JSONRPCErrorError> {
+        // Keep the active account before any login flow overwrites auth.json.
+        self.remember_current_account();
         match params {
             LoginAccountParams::ApiKey { api_key } => {
                 self.login_api_key_v2(request_id, LoginApiKeyParams { api_key })
@@ -1446,6 +1516,46 @@ mod tests {
     use codex_backend_client::TokenUsageProfileDailyBucket;
     use codex_backend_client::TokenUsageProfileStats;
     use pretty_assertions::assert_eq;
+
+    fn empty_auth() -> AuthDotJson {
+        AuthDotJson {
+            auth_mode: None,
+            openai_api_key: None,
+            tokens: None,
+            last_refresh: None,
+            agent_identity: None,
+            personal_access_token: None,
+            bedrock_api_key: None,
+        }
+    }
+
+    #[test]
+    fn saved_accounts_survive_app_server_restart() {
+        let codex_home = tempfile::tempdir().expect("temporary Codex home");
+        let accounts = vec![
+            SavedAccount {
+                account_id: "account-one".to_string(),
+                email: Some("one@example.com".to_string()),
+                auth_dot_json: empty_auth(),
+                last_used_at: 1,
+            },
+            SavedAccount {
+                account_id: "account-two".to_string(),
+                email: Some("two@example.com".to_string()),
+                auth_dot_json: empty_auth(),
+                last_used_at: 2,
+            },
+        ];
+
+        save_saved_accounts(codex_home.path(), &accounts).expect("save account sessions");
+        let restored = load_saved_accounts(codex_home.path());
+
+        assert_eq!(restored.len(), 2);
+        assert_eq!(restored[0].account_id, "account-one");
+        assert_eq!(restored[0].email.as_deref(), Some("one@example.com"));
+        assert_eq!(restored[1].account_id, "account-two");
+        assert_eq!(restored[1].email.as_deref(), Some("two@example.com"));
+    }
 
     #[test]
     fn account_token_usage_response_maps_profile_stats_and_daily_buckets() {

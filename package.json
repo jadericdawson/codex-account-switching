@@ -1,6 +1,6 @@
 {
   "name": "codex-account-switching",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Codex CLI with an account footer, weekly usage display, and click-to-switch accounts.",
   "license": "Apache-2.0",
   "type": "module",

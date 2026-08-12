@@ -4,7 +4,7 @@
 </p>
 </br>
 
-This personal fork preserves the upstream Codex CLI while adding account visibility and account switching. Install the latest GitHub-backed npm package with:
+This personal fork preserves the upstream Codex CLI while adding account visibility and account switching. Saved ChatGPT accounts survive restarts and switch locally without reopening a browser; use **Add another account** once for each account. Install the latest GitHub-backed npm package with:
 
 ```shell
 npm install -g github:jadericdawson/codex-account-switching
